@@ -3,7 +3,7 @@ const Promise = require('bluebird')
 const path = require('path')
 const errors = require('../errors')
 const log = require('../log')
-const fs = require('../util/fs')
+const { fs } = require('../util/fs')
 
 // TODO:
 // think about adding another PSemaphore
@@ -93,6 +93,10 @@ module.exports = {
     }, _.cloneDeep(obj))
   },
 
+  isComponentTesting (options = {}) {
+    return options.testingType === 'component'
+  },
+
   configFile (options = {}) {
     return options.configFile === false ? false : (options.configFile || 'cypress.json')
   },
@@ -144,6 +148,14 @@ module.exports = {
     .catch({ code: 'ENOENT' }, () => {
       return this._write(file, {})
     }).then((json = {}) => {
+      if (this.isComponentTesting(options) && 'component' in json) {
+        json = { ...json, ...json.component }
+      }
+
+      if (!this.isComponentTesting(options) && 'e2e' in json) {
+        json = { ...json, ...json.e2e }
+      }
+
       const changed = this._applyRewriteRules(json)
 
       // if our object is unchanged

@@ -2,10 +2,13 @@ const fs = require('fs')
 const path = require('path')
 const server = require('socket.io')
 const client = require('socket.io-client')
+const parser = require('socket.io-parser')
 const expect = require('chai').expect
 const pkg = require('../package.json')
 const lib = require('../index')
 const resolvePkg = require('resolve-pkg')
+
+const { PacketType } = parser
 
 describe('Socket', function () {
   it('exports server', function () {
@@ -44,6 +47,139 @@ describe('Socket', function () {
         expect(lib.getClientSource()).to.eq(str)
         done()
       })
+    })
+  })
+
+  context('blob encoding + decoding', () => {
+    it('correctly encodes and decodes binary blob data', (done) => {
+      const encoder = new parser.Encoder()
+
+      const obj = {
+        type: PacketType.EVENT,
+        data: ['a', Buffer.from('abc', 'utf8')],
+        // data: ['a', { foo: 'bar' }],
+        id: 23,
+        nsp: '/cool',
+      }
+
+      const originalData = obj.data
+
+      const encodedPackets = encoder.encode(obj)
+
+      const decoder = new parser.Decoder()
+
+      decoder.on('decoded', (packet) => {
+        obj.data = originalData
+        obj.attachments = undefined
+        expect(packet).to.eql(obj)
+        done()
+      })
+
+      for (let i = 0; i < encodedPackets.length; i++) {
+        decoder.add(encodedPackets[i])
+      }
+    })
+
+    it('correctly encodes and decodes circular data', (done) => {
+      const encoder = new parser.Encoder()
+
+      const circularObj = {
+        foo: {},
+      }
+
+      circularObj.foo.circularObj = circularObj
+
+      const obj = {
+        type: PacketType.EVENT,
+        data: ['a', circularObj],
+        id: 23,
+        nsp: '/cool',
+      }
+
+      const originalData = obj.data
+
+      const encodedPackets = encoder.encode(obj)
+
+      const decoder = new parser.Decoder()
+
+      decoder.on('decoded', (packet) => {
+        obj.data = originalData
+        expect(packet.data[1] === packet.data[1].foo.circularObj).to.be.true
+        expect(packet).to.eql(obj)
+        done()
+      })
+
+      for (let i = 0; i < encodedPackets.length; i++) {
+        decoder.add(encodedPackets[i])
+      }
+    })
+
+    it('correctly encodes and decodes circular data containing binary', (done) => {
+      const encoder = new parser.Encoder()
+
+      const circularObj = {
+        foo: {},
+        bin: Buffer.from('abc', 'utf8'),
+      }
+
+      circularObj.foo.circularObj = circularObj
+
+      const obj = {
+        type: PacketType.EVENT,
+        data: ['a', circularObj],
+        id: 23,
+        nsp: '/cool',
+      }
+
+      const originalData = obj.data
+
+      const encodedPackets = encoder.encode(obj)
+
+      const decoder = new parser.Decoder()
+
+      decoder.on('decoded', (packet) => {
+        obj.data = originalData
+        obj.attachments = undefined
+        expect(packet.data[1] === packet.data[1].foo.circularObj).to.be.true
+        expect(packet).to.eql(obj)
+        done()
+      })
+
+      for (let i = 0; i < encodedPackets.length; i++) {
+        decoder.add(encodedPackets[i])
+      }
+    })
+
+    it('correctly encodes and decodes binary data with objs with no prototype', (done) => {
+      const encoder = new parser.Encoder()
+
+      const noProtoObj = Object.create(null)
+
+      noProtoObj.foo = 'foo'
+
+      const obj = {
+        type: PacketType.EVENT,
+        data: ['a', noProtoObj, Buffer.from('123', 'utf8')],
+        id: 23,
+        nsp: '/cool',
+      }
+
+      const originalData = obj.data
+
+      const encodedPackets = encoder.encode(obj)
+
+      const decoder = new parser.Decoder()
+
+      decoder.on('decoded', (packet) => {
+        obj.data = originalData
+        obj.attachments = undefined
+        expect(packet).to.eql(obj)
+        done()
+      })
+
+      for (let i = 0; i < encodedPackets.length; i++) {
+        decoder.add(encodedPackets[i])
+      }
     })
   })
 })

@@ -2,9 +2,10 @@ require('../spec_helper')
 
 const chokidar = require('chokidar')
 const browsers = require(`${root}lib/browsers`)
-const Project = require(`${root}lib/project`)
+const { ProjectE2E } = require(`${root}lib/project-e2e`)
 const openProject = require(`${root}lib/open_project`)
 const preprocessor = require(`${root}lib/plugins/preprocessor`)
+const runEvents = require(`${root}lib/plugins/run_events`)
 
 describe('lib/open_project', () => {
   beforeEach(function () {
@@ -22,11 +23,11 @@ describe('lib/open_project', () => {
 
     sinon.stub(browsers, 'get').resolves()
     sinon.stub(browsers, 'open')
-    sinon.stub(Project.prototype, 'open').resolves()
-    sinon.stub(Project.prototype, 'reset').resolves()
-    sinon.stub(Project.prototype, 'getSpecUrl').resolves()
-    sinon.stub(Project.prototype, 'getConfig').resolves(this.config)
-    sinon.stub(Project.prototype, 'getAutomation').returns(this.automation)
+    sinon.stub(ProjectE2E.prototype, 'open').resolves()
+    sinon.stub(ProjectE2E.prototype, 'reset').resolves()
+    sinon.stub(ProjectE2E.prototype, 'getSpecUrl').resolves()
+    sinon.stub(ProjectE2E.prototype, 'getConfig').resolves(this.config)
+    sinon.stub(ProjectE2E.prototype, 'getAutomation').returns(this.automation)
     sinon.stub(preprocessor, 'removeFile')
 
     openProject.create('/project/root')
@@ -76,7 +77,7 @@ describe('lib/open_project', () => {
     it('calls project.reset on launch', function () {
       return openProject.launch(this.browser, this.spec)
       .then(() => {
-        expect(Project.prototype.reset).to.be.called
+        expect(ProjectE2E.prototype.reset).to.be.called
       })
     })
 
@@ -89,6 +90,116 @@ describe('lib/open_project', () => {
         expect(this.browser.isHeaded).to.be.true
 
         expect(this.browser.isHeadless).to.be.false
+      })
+    })
+
+    describe('spec events', function () {
+      beforeEach(function () {
+        sinon.stub(runEvents, 'execute').resolves()
+      })
+
+      it('executes before:spec if in interactive mode', function () {
+        this.config.experimentalInteractiveRunEvents = true
+        this.config.isTextTerminal = false
+
+        return openProject.launch(this.browser, this.spec).then(() => {
+          expect(runEvents.execute).to.be.calledWith('before:spec', this.config, this.spec)
+        })
+      })
+
+      it('does not execute before:spec if not in interactive mode', function () {
+        this.config.experimentalInteractiveRunEvents = true
+        this.config.isTextTerminal = true
+
+        return openProject.launch(this.browser, this.spec).then(() => {
+          expect(runEvents.execute).not.to.be.calledWith('before:spec')
+        })
+      })
+
+      it('does not execute before:spec if experimental flag is not enabled', function () {
+        this.config.experimentalInteractiveRunEvents = false
+        this.config.isTextTerminal = false
+
+        return openProject.launch(this.browser, this.spec).then(() => {
+          expect(runEvents.execute).not.to.be.calledWith('before:spec')
+        })
+      })
+
+      it('executes after:spec on browser close if in interactive mode', function () {
+        this.config.experimentalInteractiveRunEvents = true
+        this.config.isTextTerminal = false
+
+        return openProject.launch(this.browser, this.spec)
+        .then(() => {
+          browsers.open.lastCall.args[1].onBrowserClose()
+        })
+        .delay(100) // needs a tick or two for the event to fire
+        .then(() => {
+          expect(runEvents.execute).to.be.calledWith('after:spec', this.config, this.spec)
+        })
+      })
+
+      it('does not execute after:spec on browser close if not in interactive mode', function () {
+        this.config.experimentalInteractiveRunEvents = true
+        this.config.isTextTerminal = true
+
+        return openProject.launch(this.browser, this.spec)
+        .then(() => {
+          browsers.open.lastCall.args[1].onBrowserClose()
+        })
+        .delay(10) // wait a few ticks to make sure it hasn't fired
+        .then(() => {
+          expect(runEvents.execute).not.to.be.calledWith('after:spec')
+        })
+      })
+
+      it('does not execute after:spec on browser close if experimental flag is not enabled', function () {
+        this.config.experimentalInteractiveRunEvents = false
+        this.config.isTextTerminal = false
+
+        return openProject.launch(this.browser, this.spec)
+        .then(() => {
+          browsers.open.lastCall.args[1].onBrowserClose()
+        })
+        .delay(10) // wait a few ticks to make sure it hasn't fired
+        .then(() => {
+          expect(runEvents.execute).not.to.be.calledWith('after:spec')
+        })
+      })
+
+      it('does not execute after:spec on browser close if the project is no longer open', function () {
+        this.config.experimentalInteractiveRunEvents = true
+        this.config.isTextTerminal = false
+
+        return openProject.launch(this.browser, this.spec)
+        .then(() => {
+          openProject.__reset()
+          browsers.open.lastCall.args[1].onBrowserClose()
+        })
+        .delay(10) // wait a few ticks to make sure it hasn't fired
+        .then(() => {
+          expect(runEvents.execute).not.to.be.calledWith('after:spec')
+        })
+      })
+
+      it('sends after:spec errors through onError option', function () {
+        const err = new Error('thrown from after:spec handler')
+        const onError = sinon.stub()
+
+        this.config.experimentalInteractiveRunEvents = true
+        this.config.isTextTerminal = false
+        runEvents.execute.withArgs('after:spec').rejects(err)
+        openProject.getProject().options.onError = onError
+
+        return openProject.launch(this.browser, this.spec)
+        .then(() => {
+          browsers.open.lastCall.args[1].onBrowserClose()
+        })
+        .delay(100) // needs a tick or two for the event to fire
+        .then(() => {
+          expect(runEvents.execute).to.be.calledWith('after:spec')
+          expect(onError).to.be.calledWith(err)
+        })
       })
     })
   })

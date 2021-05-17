@@ -1,77 +1,4 @@
 .reporter {
-  .hooks-container {
-    margin: 5px 0 5px 5px;
-    padding-left: 10px;
-    border-left: 1px dotted #DDD;
-
-    .hook-item {
-      margin-bottom: 5px;
-
-      &:last-of-type {
-        margin-bottom: 0;
-      }
-    }
-
-    i {
-      margin-right: 3px;
-    }
-
-    .hook-header {
-      display: flex;
-      width: 100%;
-
-      &:hover {
-        .collapsible-header {
-          color: #6a6b6c;
-        }
-
-        .hook-open-in-ide {
-          display: block;
-        }
-      }
-
-      .collapsible-header {
-        text-transform: uppercase;
-        color: #959595;
-        display: inline-block;
-        flex-grow: 1;
-        font-size: 11px;
-        cursor: pointer;
-        padding: 4px 0;
-
-        &:focus {
-          outline: none;
-        }
-
-        > .collapsible-header-inner:focus {
-          outline: 0;
-        }
-      }
-
-      .hook-failed-message {
-        color: #E94F5F;
-        display: none;
-      }
-
-      .hook-open-in-ide {
-        align-items: center;
-        color: #6a6b6c;
-        display: none;
-        padding: 4px 10px;
-
-        &:hover, &:focus {
-          background-color: rgba(186, 186, 186, 0.2);
-          outline: none;
-          text-decoration: none;
-        }
-      }
-    }
-
-    .hook-failed .hook-failed-message {
-      display: inline;
-    }
-  }
-
   .commands-container {
     background-color: #eef1f4;
     font-family: $monospace;
@@ -91,6 +18,39 @@
   .command-scaled {
     font-size: 85%;
     line-height: 14px;
+  }
+
+  .command-is-studio {
+    cursor: auto;
+
+    &.command-type-parent .command-controls .studio-command-remove {
+      display: block;
+      padding-left: 5px;
+
+      &:hover {
+        color: #565554;
+      }
+    }
+
+    .command-wrapper:hover {
+      background-color: #eef1f4;
+    }
+  }
+
+  .hook-studio {
+    .command-wrapper:hover {
+      background-color: #eef1f4;
+    }
+
+    .command-type-parent {
+      &:hover {
+        border-top: 1px solid #e3e3e3;
+      }
+
+      &:first-child {
+        border-top: 0;
+      }
+    }
   }
 
   .command-is-event {
@@ -127,6 +87,7 @@
 
   .command-wrapper {
     color: #777;
+    min-height: 20px;
 
     &:hover {
       background-color: #E0E5E7;
@@ -143,10 +104,6 @@
         padding: 0 5px;
         display: inline-block;
 
-        &.show-count {
-          padding-right: 2px;
-        }
-
         &.route {
           background-color: $yellow-medium;
         }
@@ -161,7 +118,13 @@
         }
 
         &.show-count {
+          padding-right: 2px;
           border-radius: 10px 0 0 10px;
+          max-width: 200px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          vertical-align: top;
         }
       }
 
@@ -187,8 +150,13 @@
 
       .num-duplicates.has-alias {
         border-radius: 10px;
-        line-height: 2;
+        line-height: 1;
         padding: 3px 5px 3px 5px;
+      }
+
+      .num-duplicates.has-alias.has-duplicates {
+        border-radius: 0 10px 10px 0;
+        padding: 4px 5px 2px 3px;
       }
 
       .command-alias-count {
@@ -437,7 +405,13 @@
     }
   }
 
-  .command-name-log, .command-name-get {
+  .command-name-log,
+  .command-name-get,
+  .command-name-download {
+    // we're wrapping the text, so override command-scaled
+    font-size: 100%;
+    line-height: 18px;
+
     .command-message-text {
       white-space: initial;
       word-wrap: break-word;
@@ -448,10 +422,21 @@
     }
   }
 
+  .command-name-uncaught-exception {
+    // need extra spacing between (uncaught exception) and the error message
+    .command-message {
+      margin-left: 5px;
+    }
+  }
+
   .command-controls {
     i {
       padding: 2px;
       color: #ababab;
+    }
+
+    .studio-command-remove {
+      display: none;
     }
 
     .command-alias {
@@ -571,7 +556,7 @@
   }
 
   .command-is-pinned,
-  .command:hover {
+  .command:not(.command-is-studio):hover {
     .command-number {
       display: none;
     }
@@ -644,6 +629,35 @@
   &[min-width~="300px"] {
     .command-wrapper-text {
       flex-wrap: nowrap;
+    }
+  }
+
+  .studio-prompt {
+    cursor: auto;
+
+    .command-wrapper {
+      padding: 5px 10px;
+      pointer-events: none;
+
+      .command-wrapper-text {
+        align-items: center;
+
+        .command-message {
+          text-align: center;
+
+          .command-message-text {
+            color: $pending;
+          }
+        }
+
+        .command-controls i {
+          color: $pending;
+
+          &:hover {
+            color: $pending;
+          }
+        }
+      }
     }
   }
 }

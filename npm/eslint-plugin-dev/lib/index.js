@@ -50,6 +50,8 @@ const baseRules = {
     'error',
     2,
     {
+      // TODO: fix this, we shouldn't need to ignore TemplateLiterals
+      'ignoredNodes': ['TemplateLiteral'],
       'SwitchCase': 1,
       'MemberExpression': 0,
     },
@@ -193,7 +195,8 @@ const baseRules = {
   ],
   'space-infix-ops': 'error',
   'space-unary-ops': 'error',
-  'template-curly-spacing': 'error',
+  // TODO: change this back to 'error'
+  'template-curly-spacing': 'off',
   'use-isnan': 'error',
   'valid-typeof': 'error',
 }
@@ -213,6 +216,9 @@ module.exports = {
       settings: {
         json: {
           'sort-package-json': 'pro',
+        },
+        react: {
+          version: 'detect',
         },
       },
       env: {
@@ -252,12 +258,16 @@ module.exports = {
           },
         },
         {
-          files: '*.ts',
+          files: [
+            '*.ts',
+            '*.tsx',
+          ],
           parser: '@typescript-eslint/parser',
           plugins: [
             '@typescript-eslint',
           ],
           rules: {
+            'no-undef': 'off',
             'no-unused-vars': 'off',
             '@typescript-eslint/no-unused-vars': [
               'error',
@@ -299,8 +309,18 @@ module.exports = {
         'mocha/no-global-tests': 'error',
         '@cypress/dev/skip-comment': 'error',
       },
+      overrides: [{
+        files: '*.spec.tsx',
+        parser: '@typescript-eslint/parser',
+        plugins: [
+          '@typescript-eslint',
+          'react',
+        ],
+        rules: {
+          'no-unused-vars': 'off', // avoid interface imports to be warned against
+        },
+      }],
     },
-
     react: {
       env: {
         browser: true,
@@ -318,7 +338,6 @@ module.exports = {
       rules: {
         'react/jsx-curly-spacing': 'error',
         'react/jsx-equals-spacing': 'error',
-        'react/jsx-filename-extension': 'error',
         'react/jsx-no-duplicate-props': 'error',
         'react/jsx-no-undef': 'error',
         'react/jsx-pascal-case': 'error',
@@ -329,6 +348,7 @@ module.exports = {
         'react/prefer-es6-class': 'error',
         'react/react-in-jsx-scope': 'error',
         'react/require-render-return': 'error',
+        'react/jsx-filename-extension': 'error',
       },
     },
   },

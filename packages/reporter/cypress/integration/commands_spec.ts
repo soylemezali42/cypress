@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events'
-import { RootRunnable } from './../../src/runnables/runnables-store'
+import { RootRunnable } from '../../src/runnables/runnables-store'
 import { addCommand } from '../support/utils'
 
 describe('commands', () => {
@@ -39,10 +39,6 @@ describe('commands', () => {
     })
 
     cy.contains('http://localhost:3000') // ensure test content has loaded
-
-    // ensure the page is loaded before proceeding
-    // this makes visual snapshots stable
-    cy.get('.focus-tests-text').should('be.visible')
   })
 
   it('displays all the commands', () => {
@@ -232,12 +228,26 @@ describe('commands', () => {
       .should('have.text', '4')
     })
 
+    it('displays names of duplicates', () => {
+      cy.contains('GET --- /dup').closest('.command').find('.command-alias')
+      .should('have.text', 'dup0, dup1')
+    })
+
     it('expands all events after clicking arrow', () => {
       cy.contains('GET --- /dup').closest('.command').find('.command-expander').click()
       cy.get('.command-name-xhr').should('have.length', 6)
       cy.contains('GET --- /dup').closest('.command').find('.duplicates')
       .should('be.visible')
       .find('.command').should('have.length', 3)
+    })
+
+    it('splits up duplicate names when expanded', () => {
+      cy.contains('GET --- /dup').closest('.command').as('cmd')
+
+      cy.get('@cmd').find('.command-expander').click()
+      cy.get('@cmd').find('.command-alias').as('alias')
+      cy.get('@alias').its(0).should('have.text', 'dup0')
+      cy.get('@alias').its(1).should('have.text', 'dup1')
     })
   })
 
@@ -319,6 +329,54 @@ describe('commands', () => {
       it('does not hide the snapshot if there is another mouseover before 50ms passes', () => {
         cy.wrap(runner.emit).should('not.be.calledWith', 'runner:hide:snapshot')
       })
+    })
+  })
+
+  context('studio commands', () => {
+    beforeEach(() => {
+      addCommand(runner, {
+        id: 10,
+        number: 7,
+        name: 'get',
+        message: '#studio-command-parent',
+        state: 'success',
+        isStudio: true,
+        type: 'parent',
+      })
+
+      addCommand(runner, {
+        id: 11,
+        name: 'click',
+        message: '#studio-command-child',
+        state: 'success',
+        isStudio: true,
+        type: 'child',
+      })
+    })
+
+    it('studio commands have command-is-studio class', () => {
+      cy.contains('#studio-command-parent').closest('.command')
+      .should('have.class', 'command-is-studio')
+
+      cy.contains('#studio-command-child').closest('.command')
+      .should('have.class', 'command-is-studio')
+    })
+
+    it('only parent studio commands display remove button', () => {
+      cy.contains('#studio-command-parent').closest('.command')
+      .find('.studio-command-remove').should('be.visible')
+
+      cy.contains('#studio-command-child').closest('.command')
+      .find('.studio-command-remove').should('not.be.visible')
+    })
+
+    it('emits studio:remove:command with number when delete button is clicked', () => {
+      cy.spy(runner, 'emit')
+
+      cy.contains('#studio-command-parent').closest('.command')
+      .find('.studio-command-remove').click()
+
+      cy.wrap(runner.emit).should('be.calledWith', 'studio:remove:command', 7)
     })
   })
 })

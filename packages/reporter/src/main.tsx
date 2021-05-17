@@ -22,7 +22,7 @@ import Runnables from './runnables/runnables'
 
 interface BaseReporterProps {
   appState: AppState
-  autoScrollingEnabled?: boolean
+  className?: string
   runnablesStore: RunnablesStore
   runner: Runner
   scroller: Scroller
@@ -30,25 +30,25 @@ interface BaseReporterProps {
   events: Events
   error?: RunnablesErrorModel
   resetStatsOnSpecChange?: boolean
-  renderReporterHeader?: (props: ReporterHeaderProps) => JSX.Element;
+  renderReporterHeader?: (props: ReporterHeaderProps) => JSX.Element
   spec: Cypress.Cypress['spec']
+  experimentalStudioEnabled: boolean
   /** Used for component testing front-end */
   specRunId?: string | null
 }
 
 export interface SingleReporterProps extends BaseReporterProps{
-  runMode: 'single',
+  runMode: 'single'
 }
 
 export interface MultiReporterProps extends BaseReporterProps{
-  runMode: 'multi',
+  runMode: 'multi'
   allSpecs: Array<Cypress.Cypress['spec']>
 }
 
 @observer
 class Reporter extends Component<SingleReporterProps | MultiReporterProps> {
   static propTypes = {
-    autoScrollingEnabled: PropTypes.bool,
     error: PropTypes.shape({
       title: PropTypes.string.isRequired,
       link: PropTypes.string,
@@ -64,6 +64,7 @@ class Reporter extends Component<SingleReporterProps | MultiReporterProps> {
       relative: PropTypes.string.isRequired,
       absolute: PropTypes.string.isRequired,
     }),
+    experimentalStudioEnabled: PropTypes.bool,
   }
 
   static defaultProps = {
@@ -78,17 +79,23 @@ class Reporter extends Component<SingleReporterProps | MultiReporterProps> {
   render () {
     const {
       appState,
+      className,
       runMode,
       runnablesStore,
       scroller,
       error,
       events,
       statsStore,
+      experimentalStudioEnabled,
       renderReporterHeader = (props: ReporterHeaderProps) => <Header {...props}/>,
     } = this.props
 
     return (
-      <div className={cs('reporter', { multiSpecs: runMode === 'multi' })}>
+      <div className={cs(className, 'reporter', {
+        multiSpecs: runMode === 'multi',
+        'experimental-studio-enabled': experimentalStudioEnabled,
+        'studio-active': appState.studioActive,
+      })}>
         {renderReporterHeader({ appState, statsStore })}
         {this.props.runMode === 'single' ? (
           <Runnables
@@ -111,7 +118,8 @@ class Reporter extends Component<SingleReporterProps | MultiReporterProps> {
 
         <ForcedGcWarning
           appState={appState}
-          events={events}/>
+          events={events}
+        />
       </div>
     )
   }
@@ -132,10 +140,10 @@ class Reporter extends Component<SingleReporterProps | MultiReporterProps> {
   }
 
   componentDidMount () {
-    const { spec, appState, autoScrollingEnabled, runnablesStore, runner, scroller, statsStore } = this.props
+    const { spec, appState, runnablesStore, runner, scroller, statsStore } = this.props
 
     action('set:scrolling', () => {
-      appState.setAutoScrolling(autoScrollingEnabled)
+      appState.setAutoScrolling(appState.autoScrollingEnabled)
     })()
 
     this.props.events.init({

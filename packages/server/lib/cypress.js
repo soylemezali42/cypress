@@ -13,6 +13,7 @@ const R = require('ramda')
 const Promise = require('bluebird')
 const debug = require('debug')('cypress:server:cypress')
 const argsUtils = require('./util/args')
+const chalk = require('chalk')
 
 const warning = (code, args) => {
   return require('./errors').warning(code, args)
@@ -80,8 +81,6 @@ module.exports = {
           warning('INVOKED_BINARY_OUTSIDE_NPM_MODULE')
         }
 
-        // just run the gui code directly here
-        // and pass our options directly to main
         debug('running Electron currently')
 
         return require('./modes')(mode, options)
@@ -139,10 +138,6 @@ module.exports = {
     }
 
     debug('from argv %o got options %o', argv, options)
-
-    if (options.componentTesting) {
-      throw new Error('Component testing mode is not implemented. But coming 🥳.')
-    }
 
     if (options.headless) {
       // --headless is same as --headed false
@@ -249,7 +244,8 @@ module.exports = {
 
       case 'getKey':
         // print the key + exit
-        return require('./project').getSecretKeyByPath(options.projectRoot)
+        return require('./project-base').ProjectBase
+        .getSecretKeyByPath(options.projectRoot)
         .then((key) => {
           return console.log(key) // eslint-disable-line no-console
         }).then(exit0)
@@ -257,7 +253,8 @@ module.exports = {
 
       case 'generateKey':
         // generate + print the key + exit
-        return require('./project').generateSecretKeyByPath(options.projectRoot)
+        return require('./project-base').ProjectBase
+        .generateSecretKeyByPath(options.projectRoot)
         .then((key) => {
           return console.log(key) // eslint-disable-line no-console
         }).then(exit0)
@@ -272,7 +269,20 @@ module.exports = {
         // run headlessly and exit
         // with num of totalFailed
         return this.runElectron(mode, options)
-        .get('totalFailed')
+        .then((results) => {
+          if (results.runs) {
+            const isCanceled = results.runs.filter((run) => run.skippedSpec).length
+
+            if (isCanceled) {
+              // eslint-disable-next-line no-console
+              console.log(chalk.magenta('\n  Exiting with non-zero exit code because the run was canceled.'))
+
+              return 1
+            }
+          }
+
+          return results.totalFailed
+        })
         .then(exit)
         .catch(exitErr)
 

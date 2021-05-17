@@ -13,7 +13,7 @@ const nestedObjectsInCurlyBracesRe = /\{(.+?)\}/g
 const nestedArraysInSquareBracketsRe = /\[(.+?)\]/g
 const everythingAfterFirstEqualRe = /=(.*)/
 
-const allowList = 'appPath apiKey browser ci ciBuildId clearLogs config configFile cwd env execPath exit exitWithCode generateKey getKey group headed inspectBrk key logs mode outputPath parallel ping port project proxySource quiet record reporter reporterOptions returnPkg runMode runProject smokeTest spec tag updating version'.split(' ')
+const allowList = 'appPath apiKey browser ci ciBuildId clearLogs config configFile cwd env execPath exit exitWithCode generateKey getKey group headed inspectBrk key logs mode outputPath parallel ping port project proxySource quiet record reporter reporterOptions returnPkg runMode runProject smokeTest spec tag updating version testingType'.split(' ')
 // returns true if the given string has double quote character "
 // only at the last position.
 const hasStrayEndQuote = (s) => {
@@ -186,6 +186,7 @@ module.exports = {
       'run-mode': 'isTextTerminal',
       'run-project': 'runProject',
       'smoke-test': 'smokeTest',
+      'testing-type': 'testingType',
     }
 
     // takes an array of args and converts
@@ -212,11 +213,14 @@ module.exports = {
       // set in case we
       // bypassed the cli
       cwd: process.cwd(),
+      testingType: 'e2e',
     })
     .mapValues(coerceUtil)
     .value()
 
     debug('argv parsed: %o', options)
+
+    // throw new Error()
 
     // if we are updating we may have to pluck out the
     // appPath + execPath from the options._ because
@@ -236,6 +240,12 @@ module.exports = {
     // only accept project if it is a string
     if (typeof project !== 'string') {
       project = undefined
+    }
+
+    // if non-string key has been passed, set it to undefined
+    // https://github.com/cypress-io/cypress/issues/14571
+    if (typeof options.key !== 'string') {
+      delete options.key
     }
 
     if (spec) {
@@ -317,10 +327,6 @@ module.exports = {
     // normalize output path from previous current working directory
     if (outputPath) {
       options.outputPath = path.resolve(options.cwd, outputPath)
-    }
-
-    if (options.runProject) {
-      options.run = true
     }
 
     if (options.smokeTest) {

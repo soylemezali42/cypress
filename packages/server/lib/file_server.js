@@ -6,7 +6,8 @@ const url = require('url')
 const http = require('http')
 const path = require('path')
 const send = require('send')
-const allowDestroy = require('./util/server_destroy')
+const { httpUtils } = require('@packages/network')
+const { allowDestroy } = require('./util/server_destroy')
 const random = require('./util/random')
 const networkFailures = require('./util/network_failures')
 
@@ -52,7 +53,7 @@ module.exports = {
     return new Promise(((resolve) => {
       const token = random.id(64)
 
-      const srv = http.createServer((req, res) => {
+      const srv = http.createServer(httpUtils.lenientOptions, (req, res) => {
         return onRequest(req, res, token, fileServerFolder)
       })
 

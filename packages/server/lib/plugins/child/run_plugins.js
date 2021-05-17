@@ -5,12 +5,13 @@ const debug = require('debug')('cypress:server:plugins:child')
 const Promise = require('bluebird')
 
 const preprocessor = require('./preprocessor')
+const devServer = require('./dev-server')
 const resolve = require('../../util/resolve')
 const browserLaunch = require('./browser_launch')
 const task = require('./task')
 const util = require('../util')
 const validateEvent = require('./validate_event')
-const { registerTsNode } = require('../../util/ts-node')
+const tsNodeUtil = require('./ts_node')
 
 let registeredEventsById = {}
 let registeredEventsByName = {}
@@ -111,33 +112,30 @@ const execute = (ipc, event, ids, args = []) => {
     util.wrapChildPromise(ipc, invoke, ids, args)
   }
 
-  const handlers = {
-    'after:run': wrapChildPromise,
-    'after:screenshot': wrapChildPromise,
-    'after:spec': wrapChildPromise,
-    'before:browser:launch' () {
-      browserLaunch.wrap(ipc, invoke, ids, args)
-    },
-    'before:run': wrapChildPromise,
-    'before:spec': wrapChildPromise,
-    'file:preprocessor' () {
-      preprocessor.wrap(ipc, invoke, ids, args)
-    },
-    'task' () {
-      task.wrap(ipc, registeredEventsById, ids, args)
-    },
-    '_get:task:keys' () {
-      task.getKeys(ipc, registeredEventsById, ids)
-    },
-    '_get:task:body' () {
-      task.getBody(ipc, registeredEventsById, ids, args)
-    },
-    'default' () {
+  switch (event) {
+    case 'dev-server:start':
+      return devServer.wrap(ipc, invoke, ids, args)
+    case 'file:preprocessor':
+      return preprocessor.wrap(ipc, invoke, ids, args)
+    case 'before:run':
+    case 'before:spec':
+    case 'after:run':
+    case 'after:spec':
+    case 'after:screenshot':
+      return wrapChildPromise()
+    case 'task':
+      return task.wrap(ipc, registeredEventsById, ids, args)
+    case '_get:task:keys':
+      return task.getKeys(ipc, registeredEventsById, ids)
+    case '_get:task:body':
+      return task.getBody(ipc, registeredEventsById, ids, args)
+    case 'before:browser:launch':
+      return browserLaunch.wrap(ipc, invoke, ids, args)
+    default:
       debug('unexpected execute message:', event, args)
-    },
-  }
 
-  ;(handlers[event] || handlers['default'])()
+      return
+  }
 }
 
 let tsRegistered = false
@@ -166,7 +164,7 @@ const runPlugins = (ipc, pluginsFile, projectRoot) => {
   })
 
   if (!tsRegistered) {
-    registerTsNode(projectRoot, pluginsFile)
+    tsNodeUtil.register(projectRoot, pluginsFile)
 
     // ensure typescript is only registered once
     tsRegistered = true

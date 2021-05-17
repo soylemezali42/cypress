@@ -3,10 +3,11 @@ require('../../spec_helper')
 const os = require('os')
 
 const extension = require('@packages/extension')
+const launch = require('@packages/launcher/lib/browsers')
 const plugins = require(`${root}../lib/plugins`)
 const utils = require(`${root}../lib/browsers/utils`)
 const chrome = require(`${root}../lib/browsers/chrome`)
-const fs = require(`${root}../lib/util/fs`)
+const { fs } = require(`${root}../lib/util/fs`)
 
 describe('lib/browsers/chrome', () => {
   context('#open', () => {
@@ -19,9 +20,11 @@ describe('lib/browsers/chrome', () => {
           screencastFrame: sinon.stub().returns(),
         },
         close: sinon.stub().resolves(),
+        on: sinon.stub(),
       }
 
       this.automation = {
+        push: sinon.stub(),
         use: sinon.stub().returns(),
       }
 
@@ -30,10 +33,19 @@ describe('lib/browsers/chrome', () => {
         kill: sinon.stub().returns(),
       }
 
+      this.onCriEvent = (event, data, options) => {
+        this.criClient.on.withArgs(event).yieldsAsync(data)
+
+        return chrome.open('chrome', 'http://', options, this.automation)
+        .then(() => {
+          this.criClient.on = undefined
+        })
+      }
+
       sinon.stub(chrome, '_writeExtension').resolves('/path/to/ext')
       sinon.stub(chrome, '_connectToChromeRemoteInterface').resolves(this.criClient)
       sinon.stub(plugins, 'execute').callThrough()
-      sinon.stub(utils, 'launch').resolves(this.launchedBrowser)
+      sinon.stub(launch, 'launch').resolves(this.launchedBrowser)
       sinon.stub(utils, 'getProfileDir').returns('/profile/dir')
       sinon.stub(utils, 'ensureCleanCache').resolves('/profile/dir/CypressCache')
 
@@ -43,21 +55,22 @@ describe('lib/browsers/chrome', () => {
       this.readJson.withArgs('/profile/dir/Local State').rejects({ code: 'ENOENT' })
 
       // port for Chrome remote interface communication
-      return sinon.stub(utils, 'getPort').resolves(50505)
+      sinon.stub(utils, 'getPort').resolves(50505)
     })
 
     afterEach(function () {
       expect(this.criClient.ensureMinimumProtocolVersion).to.be.calledOnce
     })
 
-    it('focuses on the page, calls CRI Page.visit, and sets download behavior', function () {
+    it('focuses on the page, calls CRI Page.visit, enables Page events, and sets download behavior', function () {
       return chrome.open('chrome', 'http://', {}, this.automation)
       .then(() => {
         expect(utils.getPort).to.have.been.calledOnce // to get remote interface port
-        expect(this.criClient.send).to.have.been.calledThrice
+        expect(this.criClient.send.callCount).to.equal(4)
         expect(this.criClient.send).to.have.been.calledWith('Page.bringToFront')
 
         expect(this.criClient.send).to.have.been.calledWith('Page.navigate')
+        expect(this.criClient.send).to.have.been.calledWith('Page.enable')
         expect(this.criClient.send).to.have.been.calledWith('Page.setDownloadBehavior')
       })
     })
@@ -81,7 +94,7 @@ describe('lib/browsers/chrome', () => {
       .then(() => {
         // to initialize remote interface client and prepare for true tests
         // we load the browser with blank page first
-        expect(utils.launch).to.be.calledWith('chrome', 'about:blank', args)
+        expect(launch.launch).to.be.calledWith('chrome', 'about:blank', args)
       })
     })
 
@@ -90,11 +103,11 @@ describe('lib/browsers/chrome', () => {
 
       return chrome.open({ isHeadless: true, isHeaded: false }, 'http://', {}, this.automation)
       .then(() => {
-        const args = utils.launch.firstCall.args[2]
+        const args = launch.launch.firstCall.args[2]
 
         expect(args).to.include.members([
           '--headless',
-          '--window-size=1280,720',
+          '--window-size=1920,1080',
         ])
       })
     })
@@ -104,7 +117,7 @@ describe('lib/browsers/chrome', () => {
 
       return chrome.open({ isHeadless: true, isHeaded: false }, 'http://', {}, this.automation)
       .then(() => {
-        const args = utils.launch.firstCall.args[2]
+        const args = launch.launch.firstCall.args[2]
 
         expect(args).to.include.members([
           '--headless',
@@ -135,7 +148,7 @@ describe('lib/browsers/chrome', () => {
         channel: 'stable',
       }, 'http://', {}, this.automation)
       .then(() => {
-        const args = utils.launch.firstCall.args[2]
+        const args = launch.launch.firstCall.args[2]
 
         expect(args).to.include.members([
           `--user-data-dir=${fullPath}`,
@@ -154,7 +167,7 @@ describe('lib/browsers/chrome', () => {
 
       return chrome.open('chrome', 'http://', { onWarning }, this.automation)
       .then(() => {
-        const args = utils.launch.firstCall.args[2]
+        const args = launch.launch.firstCall.args[2]
 
         expect(args).to.deep.eq([
           '--foo=bar',
@@ -178,7 +191,7 @@ describe('lib/browsers/chrome', () => {
 
       return chrome.open('chrome', 'http://', {}, this.automation)
       .then(() => {
-        const args = utils.launch.firstCall.args[2]
+        const args = launch.launch.firstCall.args[2]
 
         expect(args).to.include.members([
           '--foo=bar',
@@ -200,7 +213,7 @@ describe('lib/browsers/chrome', () => {
 
       return chrome.open('chrome', 'http://', { onWarning }, this.automation)
       .then(() => {
-        const args = utils.launch.firstCall.args[2]
+        const args = launch.launch.firstCall.args[2]
 
         expect(args).to.include.members([
           '--foo=bar',
@@ -261,23 +274,50 @@ describe('lib/browsers/chrome', () => {
     // https://github.com/cypress-io/cypress/issues/9265
     it('respond ACK after receiving new screenshot frame', function () {
       const frameMeta = { data: Buffer.from(''), sessionId: '1' }
-
-      this.criClient.on = (eventName, fn) => {
-        if (eventName === 'Page.screencastFrame') {
-          fn(frameMeta)
-        }
-      }
-
       const write = sinon.stub()
+      const options = { onScreencastFrame: write }
 
-      return chrome.open('chrome', 'http://', { onScreencastFrame: write }, this.automation)
+      return this.onCriEvent('Page.screencastFrame', frameMeta, options)
       .then(() => {
         expect(this.criClient.send).to.have.been.calledWith('Page.startScreencast')
         expect(write).to.have.been.calledWith(frameMeta)
         expect(this.criClient.send).to.have.been.calledWith('Page.screencastFrameAck', { sessionId: frameMeta.sessionId })
       })
-      .then(() => {
-        this.criClient.on = undefined
+    })
+
+    describe('downloads', function () {
+      it('pushes create:download after download begins', function () {
+        const downloadData = {
+          guid: '1',
+          suggestedFilename: 'file.csv',
+          url: 'http://localhost:1234/file.csv',
+        }
+        const options = { downloadsFolder: 'downloads' }
+
+        return this.onCriEvent('Page.downloadWillBegin', downloadData, options)
+        .then(() => {
+          expect(this.automation.push).to.be.calledWith('create:download', {
+            id: '1',
+            filePath: 'downloads/file.csv',
+            mime: 'text/csv',
+            url: 'http://localhost:1234/file.csv',
+          })
+        })
+      })
+
+      it('pushes complete:download after download completes', function () {
+        const downloadData = {
+          guid: '1',
+          state: 'completed',
+        }
+        const options = { downloadsFolder: 'downloads' }
+
+        return this.onCriEvent('Page.downloadProgress', downloadData, options)
+        .then(() => {
+          expect(this.automation.push).to.be.calledWith('complete:download', {
+            id: '1',
+          })
+        })
       })
     })
   })

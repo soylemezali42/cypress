@@ -6,11 +6,12 @@ const stripAnsi = require('strip-ansi')
 const snapshot = require('snap-shot-it')
 const R = require('ramda')
 const pkg = require('@packages/root')
-const fs = require(`${root}../lib/util/fs`)
+const { ProjectBase } = require('../../../lib/project-base')
+const { fs } = require(`${root}../lib/util/fs`)
 const user = require(`${root}../lib/user`)
 const errors = require(`${root}../lib/errors`)
 const config = require(`${root}../lib/config`)
-const Project = require(`${root}../lib/project`)
+const { ProjectE2E } = require(`${root}../lib/project-e2e`)
 const browsers = require(`${root}../lib/browsers`)
 const Reporter = require(`${root}../lib/reporter`)
 const runMode = require(`${root}../lib/modes/run`)
@@ -24,7 +25,7 @@ const { experimental } = require(`${root}../lib/experiments`)
 
 describe('lib/modes/run', () => {
   beforeEach(function () {
-    this.projectInstance = new Project('/_test-output/path/to/project')
+    this.projectInstance = new ProjectBase('/_test-output/path/to/project-e2e')
   })
 
   context('.getProjectId', () => {
@@ -100,9 +101,9 @@ describe('lib/modes/run', () => {
     it('sets width and height', () => {
       const props = runMode.getElectronProps()
 
-      expect(props.width).to.eq(1280)
+      expect(props.width).to.eq(1920)
 
-      expect(props.height).to.eq(720)
+      expect(props.height).to.eq(1080)
     })
 
     it('sets show to boolean', () => {
@@ -275,6 +276,7 @@ describe('lib/modes/run', () => {
       .then(() => {
         expect(openProject.closeBrowser).to.be.calledThrice
         expect(runMode.launchBrowser).to.be.calledThrice
+        expect(runMode.launchBrowser.firstCall.args[0]).not.property('writeVideoFrame')
         expect(errors.warning).to.be.calledWith('TESTS_DID_NOT_START_RETRYING', 'Retrying...')
         expect(errors.warning).to.be.calledWith('TESTS_DID_NOT_START_RETRYING', 'Retrying again...')
         expect(errors.get).to.be.calledWith('TESTS_DID_NOT_START_FAILED')
@@ -589,18 +591,6 @@ describe('lib/modes/run', () => {
         fs.pathExists.resolves(false)
       })
 
-      it('logs warning', function () {
-        return runMode.waitForTestsToFinishRunning({
-          project: this.projectInstance,
-          startedVideoCapture: new Date(),
-          videoName: 'foo.mp4',
-          endVideoCapture: sinon.stub().resolves(),
-        })
-        .then(() => {
-          expect(errors.warning).to.be.calledWith('VIDEO_DOESNT_EXIST', 'foo.mp4')
-        })
-      })
-
       it('does not process or upload video', function () {
         return runMode.waitForTestsToFinishRunning({
           project: this.projectInstance,
@@ -659,7 +649,8 @@ describe('lib/modes/run', () => {
     beforeEach(function () {
       sinon.stub(electron.app, 'on').withArgs('ready').yieldsAsync()
       sinon.stub(user, 'ensureAuthToken')
-      sinon.stub(Project, 'ensureExists').resolves()
+      sinon.stub(ProjectE2E, 'ensureExists').resolves()
+      sinon.stub(ProjectBase, 'ensureExists').resolves()
       sinon.stub(random, 'id').returns(1234)
       sinon.stub(openProject, 'create').resolves(openProject)
       sinon.stub(runMode, 'waitForSocketConnection').resolves()
@@ -732,7 +723,8 @@ describe('lib/modes/run', () => {
 
       sinon.stub(electron.app, 'on').withArgs('ready').yieldsAsync()
       sinon.stub(user, 'ensureAuthToken')
-      sinon.stub(Project, 'ensureExists').resolves()
+      sinon.stub(ProjectE2E, 'ensureExists').resolves()
+      sinon.stub(ProjectBase, 'ensureExists').resolves()
       sinon.stub(random, 'id').returns(1234)
       sinon.stub(openProject, 'create').resolves(openProject)
       sinon.stub(system, 'info').resolves({ osName: 'osFoo', osVersion: 'fooVersion' })

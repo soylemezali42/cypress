@@ -3,24 +3,27 @@ require('../spec_helper')
 const mockedEnv = require('mocked-env')
 const path = require('path')
 const commitInfo = require('@cypress/commit-info')
+const pkg = require('@packages/root')
 const Fixtures = require('../support/helpers/fixtures')
 const api = require(`${root}lib/api`)
 const user = require(`${root}lib/user`)
 const cache = require(`${root}lib/cache`)
 const config = require(`${root}lib/config`)
 const scaffold = require(`${root}lib/scaffold`)
-const Server = require(`${root}lib/server`)
-const Project = require(`${root}lib/project`)
-const Automation = require(`${root}lib/automation`)
+const { ServerE2E } = require(`${root}lib/server-e2e`)
+const { ProjectE2E } = require(`${root}lib/project-e2e`)
+const { Automation } = require(`${root}lib/automation`)
 const savedState = require(`${root}lib/saved_state`)
 const preprocessor = require(`${root}lib/plugins/preprocessor`)
 const plugins = require(`${root}lib/plugins`)
-const fs = require(`${root}lib/util/fs`)
+const runEvents = require(`${root}lib/plugins/run_events`)
+const system = require(`${root}lib/util/system`)
+const { fs } = require(`${root}lib/util/fs`)
 const settings = require(`${root}lib/util/settings`)
 const Watchers = require(`${root}lib/watchers`)
-const Socket = require(`${root}lib/socket`)
+const { SocketE2E } = require(`${root}lib/socket-e2e`)
 
-describe('lib/project', () => {
+describe('lib/project-e2e', () => {
   beforeEach(function () {
     Fixtures.scaffold()
 
@@ -28,13 +31,18 @@ describe('lib/project', () => {
     this.idsPath = Fixtures.projectPath('ids')
     this.pristinePath = Fixtures.projectPath('pristine')
 
+    sinon.stub(scaffold, 'isNewProject').resolves(false)
+    sinon.stub(runEvents, 'execute').resolves()
+
     return settings.read(this.todosPath).then((obj = {}) => {
       ({ projectId: this.projectId } = obj)
 
       return config.set({ projectName: 'project', projectRoot: '/foo/bar' })
       .then((config1) => {
         this.config = config1
-        this.project = new Project(this.todosPath)
+        this.project = new ProjectE2E(this.todosPath)
+        this.project._server = { close () {} }
+        this.project._cfg = config1
       })
     })
   })
@@ -47,26 +55,24 @@ describe('lib/project', () => {
     }
   })
 
-  it('requires a projectRoot', () => {
-    const fn = () => new Project()
+  it('requires a projectRoot', function () {
+    const fn = () => new ProjectE2E()
 
     expect(fn).to.throw('Instantiating lib/project requires a projectRoot!')
   })
 
-  it('always resolves the projectRoot to be absolute', () => {
-    const p = new Project('../foo/bar')
+  it('always resolves the projectRoot to be absolute', function () {
+    const p = new ProjectE2E('../foo/bar')
 
     expect(p.projectRoot).not.to.eq('../foo/bar')
-
     expect(p.projectRoot).to.eq(path.resolve('../foo/bar'))
   })
 
-  context('#saveState', () => {
+  context('#saveState', function () {
     beforeEach(function () {
       const integrationFolder = 'the/save/state/test'
 
       sinon.stub(config, 'get').withArgs(this.todosPath).resolves({ integrationFolder })
-      sinon.stub(this.project, 'determineIsNewProject').withArgs(integrationFolder).resolves(false)
       this.project.cfg = { integrationFolder }
 
       return savedState.create(this.project.projectRoot)
@@ -108,8 +114,9 @@ describe('lib/project', () => {
     const integrationFolder = 'foo/bar/baz'
 
     beforeEach(function () {
+      this.project._cfg = undefined
+
       sinon.stub(config, 'get').withArgs(this.todosPath, { foo: 'bar' }).resolves({ baz: 'quux', integrationFolder })
-      sinon.stub(this.project, 'determineIsNewProject').withArgs(integrationFolder).resolves(false)
     })
 
     it('calls config.get with projectRoot + options + saved state', function () {
@@ -117,7 +124,7 @@ describe('lib/project', () => {
       .then((state) => {
         sinon.stub(state, 'get').resolves({ reporterWidth: 225 })
 
-        this.project.getConfig({ foo: 'bar' })
+        return this.project.getConfig({ foo: 'bar' })
         .then((cfg) => {
           expect(cfg).to.deep.eq({
             integrationFolder,
@@ -127,12 +134,14 @@ describe('lib/project', () => {
               reporterWidth: 225,
             },
           })
+
+          this.project._cfg = cfg
         })
       })
     })
 
     it('resolves if cfg is already set', function () {
-      this.project.cfg = {
+      this.project._cfg = {
         integrationFolder,
         foo: 'bar',
       }
@@ -146,12 +155,12 @@ describe('lib/project', () => {
       })
     })
 
-    it('sets cfg.isNewProject to true when state.showedOnBoardingModal is true', function () {
+    it('sets cfg.isNewProject to false when state.showedOnBoardingModal is true', function () {
       return savedState.create(this.todosPath)
       .then((state) => {
         sinon.stub(state, 'get').resolves({ showedOnBoardingModal: true })
 
-        this.project.getConfig({ foo: 'bar' })
+        return this.project.getConfig({ foo: 'bar' })
         .then((cfg) => {
           expect(cfg).to.deep.eq({
             integrationFolder,
@@ -161,6 +170,8 @@ describe('lib/project', () => {
               showedOnBoardingModal: true,
             },
           })
+
+          this.project._cfg = cfg
         })
       })
     })
@@ -185,8 +196,8 @@ describe('lib/project', () => {
       sinon.stub(this.project, 'checkSupportFile').resolves()
       sinon.stub(this.project, 'scaffold').resolves()
       sinon.stub(this.project, 'getConfig').resolves(this.config)
-      sinon.stub(Server.prototype, 'open').resolves([])
-      sinon.stub(Server.prototype, 'reset')
+      sinon.stub(ServerE2E.prototype, 'open').resolves([])
+      sinon.stub(ServerE2E.prototype, 'reset')
       sinon.stub(config, 'updateWithPluginValues').returns(this.config)
       sinon.stub(scaffold, 'plugins').resolves()
       sinon.stub(plugins, 'init').resolves()
@@ -203,13 +214,13 @@ describe('lib/project', () => {
     })
 
     it('calls #scaffold with server config promise', function () {
-      return this.project.open().then(() => {
+      return this.project.open({}).then(() => {
         expect(this.project.scaffold).to.be.calledWith(this.config)
       })
     })
 
     it('calls #checkSupportFile with server config when scaffolding is finished', function () {
-      return this.project.open().then(() => {
+      return this.project.open({}).then(() => {
         expect(this.project.checkSupportFile).to.be.calledWith(this.config)
       })
     })
@@ -278,7 +289,7 @@ describe('lib/project', () => {
       const options = {}
 
       return this.server.open(options).then(() => {
-        const { startListening } = Socket.prototype
+        const { startListening } = SocketE2E.prototype
 
         expect(startListening.getCall(0).args[0]).to.be.instanceof(Watchers)
 
@@ -292,7 +303,7 @@ describe('lib/project', () => {
         chromeWebSecurity: false,
       })
 
-      return this.project.open()
+      return this.project.open({})
       .then(() => this.project.getConfig())
       .then((config) => {
         expect(config.chromeWebSecurity).eq(false)
@@ -315,21 +326,67 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
         expect(config).ok
       })
     })
+
+    it('executes before:run if in interactive mode', function () {
+      const sysInfo = {
+        osName: 'darwin',
+        osVersion: '1.2.3',
+      }
+
+      sinon.stub(system, 'info').resolves(sysInfo)
+      this.config.experimentalInteractiveRunEvents = true
+      this.config.isTextTerminal = false
+
+      return this.project.open({})
+      .then(() => {
+        expect(runEvents.execute).to.be.calledWith('before:run', this.config, {
+          config: this.config,
+          cypressVersion: pkg.version,
+          system: sysInfo,
+        })
+      })
+    })
+
+    it('does not get system info or execute before:run if not in interactive mode', function () {
+      sinon.stub(system, 'info')
+      this.config.experimentalInteractiveRunEvents = true
+      this.config.isTextTerminal = true
+
+      return this.project.open({})
+      .then(() => {
+        expect(system.info).not.to.be.called
+        expect(runEvents.execute).not.to.be.calledWith('before:run')
+      })
+    })
+
+    it('does not get system info or execute before:run if experimental flag is not enabled', function () {
+      sinon.stub(system, 'info')
+      this.config.experimentalInteractiveRunEvents = false
+      this.config.isTextTerminal = false
+
+      return this.project.open({})
+      .then(() => {
+        expect(system.info).not.to.be.called
+        expect(runEvents.execute).not.to.be.calledWith('before:run')
+      })
+    })
   })
 
   context('#close', () => {
     beforeEach(function () {
-      this.project = new Project('/_test-output/path/to/project')
+      this.project = new ProjectE2E('/_test-output/path/to/project-e2e')
+
+      this.project._server = { close () {} }
 
       sinon.stub(this.project, 'getConfig').resolves(this.config)
       sinon.stub(user, 'ensureAuthToken').resolves('auth-token-123')
     })
 
     it('closes server', function () {
-      this.project.server = sinon.stub({ close () {} })
+      this.project._server = sinon.stub({ close () {} })
 
       return this.project.close().then(() => {
-        expect(this.project.server.close).to.be.calledOnce
+        expect(this.project._server.close).to.be.calledOnce
       })
     })
 
@@ -344,19 +401,49 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     it('can close when server + watchers arent open', function () {
       return this.project.close()
     })
+
+    it('executes after:run if in interactive mode', function () {
+      this.config.experimentalInteractiveRunEvents = true
+      this.config.isTextTerminal = false
+
+      return this.project.close()
+      .then(() => {
+        expect(runEvents.execute).to.be.calledWith('after:run', this.config)
+      })
+    })
+
+    it('does not execute after:run if not in interactive mode', function () {
+      this.config.experimentalInteractiveRunEvents = true
+      this.config.isTextTerminal = true
+
+      return this.project.close()
+      .then(() => {
+        expect(runEvents.execute).not.to.be.calledWith('after:run')
+      })
+    })
+
+    it('does not execute after:run if experimental flag is not enabled', function () {
+      this.config.experimentalInteractiveRunEvents = false
+      this.config.isTextTerminal = false
+
+      return this.project.close()
+      .then(() => {
+        expect(runEvents.execute).not.to.be.calledWith('after:run')
+      })
+    })
   })
 
   context('#reset', () => {
     beforeEach(function () {
-      this.project = new Project(this.pristinePath)
-      this.project.automation = { reset: sinon.stub() }
-      this.project.server = { reset: sinon.stub() }
+      this.project = new ProjectE2E(this.pristinePath)
+      this.project._automation = { reset: sinon.stub() }
+      this.project._server = { close () {}, reset: sinon.stub() }
     })
 
     it('resets server + automation', function () {
       return this.project.reset()
       .then(() => {
-        expect(this.project.automation.reset).to.be.calledOnce
+        expect(this.project._automation.reset).to.be.calledOnce
 
         expect(this.project.server.reset).to.be.calledOnce
       })
@@ -365,7 +452,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
   context('#getRuns', () => {
     beforeEach(function () {
-      this.project = new Project(this.todosPath)
+      this.project = new ProjectE2E(this.todosPath)
       sinon.stub(settings, 'read').resolves({ projectId: 'id-123' })
       sinon.stub(api, 'getProjectRuns').resolves('runs')
       sinon.stub(user, 'ensureAuthToken').resolves('auth-token-123')
@@ -382,7 +469,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
   context('#scaffold', () => {
     beforeEach(function () {
-      this.project = new Project('/_test-output/path/to/project')
+      this.project = new ProjectE2E('/_test-output/path/to/project-e2e')
       sinon.stub(scaffold, 'integration').resolves()
       sinon.stub(scaffold, 'fixture').resolves()
       sinon.stub(scaffold, 'support').resolves()
@@ -468,8 +555,8 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
   context('#watchSettings', () => {
     beforeEach(function () {
-      this.project = new Project('/_test-output/path/to/project')
-      this.project.server = { startWebsockets () {} }
+      this.project = new ProjectE2E('/_test-output/path/to/project-e2e')
+      this.project._server = { close () {}, startWebsockets () {} }
       sinon.stub(settings, 'pathToConfigFile').returns('/path/to/cypress.json')
       sinon.stub(settings, 'pathToCypressEnvJson').returns('/path/to/cypress.env.json')
       this.watch = sinon.stub(this.project.watchers, 'watch')
@@ -528,7 +615,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
   context('#checkSupportFile', () => {
     beforeEach(function () {
       sinon.stub(fs, 'pathExists').resolves(true)
-      this.project = new Project('/_test-output/path/to/project')
+      this.project = new ProjectE2E('/_test-output/path/to/project-e2e')
       this.project.server = { onTestFileChange: sinon.spy() }
       sinon.stub(preprocessor, 'getFile').resolves()
 
@@ -557,7 +644,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
   context('#watchPluginsFile', () => {
     beforeEach(function () {
       sinon.stub(fs, 'pathExists').resolves(true)
-      this.project = new Project('/_test-output/path/to/project')
+      this.project = new ProjectE2E('/_test-output/path/to/project-e2e')
       this.project.watchers = { watchTree: sinon.spy() }
       sinon.stub(plugins, 'init').resolves()
 
@@ -627,11 +714,10 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
   context('#watchSettingsAndStartWebsockets', () => {
     beforeEach(function () {
-      this.project = new Project('/_test-output/path/to/project')
+      this.project = new ProjectE2E('/_test-output/path/to/project-e2e')
       this.project.watchers = {}
-      this.project.server = sinon.stub({ startWebsockets () {} })
+      this.project._server = { close () {}, startWebsockets: sinon.stub() }
       sinon.stub(this.project, 'watchSettings')
-      sinon.stub(Automation, 'create').returns('automation')
     })
 
     it('calls server.startWebsockets with automation + config', function () {
@@ -639,7 +725,10 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
       this.project.watchSettingsAndStartWebsockets({}, c)
 
-      expect(this.project.server.startWebsockets).to.be.calledWith('automation', c)
+      const args = this.project.server.startWebsockets.lastCall.args
+
+      expect(args[0]).to.be.an.instanceof(Automation)
+      expect(args[1]).to.equal(c)
     })
 
     it('passes onReloadBrowser callback', function () {
@@ -655,8 +744,8 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
   context('#getProjectId', () => {
     beforeEach(function () {
-      this.project = new Project('/_test-output/path/to/project')
-      this.verifyExistence = sinon.stub(Project.prototype, 'verifyExistence').resolves()
+      this.project = new ProjectE2E('/_test-output/path/to/project-e2e')
+      this.verifyExistence = sinon.stub(ProjectE2E.prototype, 'verifyExistence').resolves()
     })
 
     it('calls verifyExistence', function () {
@@ -682,7 +771,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
       }).catch((err) => {
         expect(err.type).to.eq('NO_PROJECT_ID')
 
-        expect(err.message).to.include('/_test-output/path/to/project')
+        expect(err.message).to.include('/_test-output/path/to/project-e2e')
       })
     })
 
@@ -704,7 +793,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
   context('#writeProjectId', () => {
     beforeEach(function () {
-      this.project = new Project('/_test-output/path/to/project')
+      this.project = new ProjectE2E('/_test-output/path/to/project-e2e')
 
       sinon.stub(settings, 'write')
       .withArgs(this.project.projectRoot, { projectId: 'id-123' })
@@ -726,7 +815,14 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
   context('#getSpecUrl', () => {
     beforeEach(function () {
-      this.project2 = new Project(this.idsPath)
+      this.project2 = new ProjectE2E(this.idsPath)
+
+      this.project._cfg = {
+        browserUrl: 'http://localhost:8888/__/',
+        integrationFolder: path.join(this.todosPath, 'tests'),
+        componentFolder: path.join(this.todosPath, 'tests'),
+        projectRoot: this.todosPath,
+      }
 
       return settings.write(this.idsPath, { port: 2020 })
     })
@@ -797,7 +893,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     })
 
     it('inserts path into cache', function () {
-      return Project.add(this.pristinePath, {})
+      return ProjectE2E.add(this.pristinePath, {})
       .then(() => cache.read()).then((json) => {
         expect(json.PROJECTS).to.deep.eq([this.pristinePath])
       })
@@ -807,7 +903,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
       it('returns object containing path and id', function () {
         sinon.stub(settings, 'read').resolves({ projectId: 'id-123' })
 
-        return Project.add(this.pristinePath, {})
+        return ProjectE2E.add(this.pristinePath, {})
         .then((project) => {
           expect(project.id).to.equal('id-123')
 
@@ -820,7 +916,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
       it('returns object containing just the path', function () {
         sinon.stub(settings, 'read').rejects()
 
-        return Project.add(this.pristinePath, {})
+        return ProjectE2E.add(this.pristinePath, {})
         .then((project) => {
           expect(project.id).to.be.undefined
 
@@ -831,7 +927,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
     describe('if configFile is non-default', () => {
       it('doesn\'t cache anything and returns object containing just the path', function () {
-        return Project.add(this.pristinePath, { configFile: false })
+        return ProjectE2E.add(this.pristinePath, { configFile: false })
         .then((project) => {
           expect(project.id).to.be.undefined
           expect(project.path).to.equal(this.pristinePath)
@@ -846,7 +942,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
   context('#createCiProject', () => {
     beforeEach(function () {
-      this.project = new Project('/_test-output/path/to/project')
+      this.project = new ProjectE2E('/_test-output/path/to/project-e2e')
       this.newProject = { id: 'project-id-123' }
 
       sinon.stub(this.project, 'writeProjectId').resolves('project-id-123')
@@ -879,7 +975,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
   context('#getRecordKeys', () => {
     beforeEach(function () {
       this.recordKeys = []
-      this.project = new Project(this.pristinePath)
+      this.project = new ProjectE2E(this.pristinePath)
       sinon.stub(settings, 'read').resolves({ projectId: 'id-123' })
       sinon.stub(user, 'ensureAuthToken').resolves('auth-token-123')
       sinon.stub(api, 'getProjectRecordKeys').resolves(this.recordKeys)
@@ -900,7 +996,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
   context('#requestAccess', () => {
     beforeEach(function () {
-      this.project = new Project(this.pristinePath)
+      this.project = new ProjectE2E(this.pristinePath)
       sinon.stub(user, 'ensureAuthToken').resolves('auth-token-123')
       sinon.stub(api, 'requestAccess').resolves('response')
     })
@@ -924,15 +1020,15 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     })
 
     it('calls cache.removeProject with path', () => {
-      return Project.remove('/_test-output/path/to/project').then(() => {
-        expect(cache.removeProject).to.be.calledWith('/_test-output/path/to/project')
+      return ProjectE2E.remove('/_test-output/path/to/project-e2e').then(() => {
+        expect(cache.removeProject).to.be.calledWith('/_test-output/path/to/project-e2e')
       })
     })
   })
 
   context('.id', () => {
     it('returns project id', function () {
-      return Project.id(this.todosPath).then((id) => {
+      return ProjectE2E.id(this.todosPath).then((id) => {
         expect(id).to.eq(this.projectId)
       })
     })
@@ -945,7 +1041,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     })
 
     it('calls api.getOrgs', () => {
-      return Project.getOrgs().then((orgs) => {
+      return ProjectE2E.getOrgs().then((orgs) => {
         expect(orgs).to.deep.eq([])
         expect(api.getOrgs).to.be.calledOnce
         expect(api.getOrgs).to.be.calledWith('auth-token-123')
@@ -959,7 +1055,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     })
 
     it('calls cache.getProjectRoots', () => {
-      return Project.paths().then((ret) => {
+      return ProjectE2E.paths().then((ret) => {
         expect(ret).to.deep.eq([])
 
         expect(cache.getProjectRoots).to.be.calledOnce
@@ -978,7 +1074,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     })
 
     it('returns array of objects with paths and ids', () => {
-      return Project.getPathsAndIds().then((pathsAndIds) => {
+      return ProjectE2E.getPathsAndIds().then((pathsAndIds) => {
         expect(pathsAndIds).to.eql([
           {
             path: '/path/to/first',
@@ -1001,7 +1097,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     it('gets projects from api', () => {
       sinon.stub(api, 'getProjects').resolves([])
 
-      return Project.getProjectStatuses([])
+      return ProjectE2E.getProjectStatuses([])
       .then(() => {
         expect(api.getProjects).to.have.been.calledWith('auth-token-123')
       })
@@ -1010,7 +1106,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     it('returns array of projects', () => {
       sinon.stub(api, 'getProjects').resolves([])
 
-      return Project.getProjectStatuses([])
+      return ProjectE2E.getProjectStatuses([])
       .then((projectsWithStatuses) => {
         expect(projectsWithStatuses).to.eql([])
       })
@@ -1019,7 +1115,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     it('returns same number as client projects, even if there are less api projects', () => {
       sinon.stub(api, 'getProjects').resolves([])
 
-      return Project.getProjectStatuses([{}])
+      return ProjectE2E.getProjectStatuses([{}])
       .then((projectsWithStatuses) => {
         expect(projectsWithStatuses.length).to.eql(1)
       })
@@ -1028,7 +1124,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     it('returns same number as client projects, even if there are more api projects', () => {
       sinon.stub(api, 'getProjects').resolves([{}, {}])
 
-      return Project.getProjectStatuses([{}])
+      return ProjectE2E.getProjectStatuses([{}])
       .then((projectsWithStatuses) => {
         expect(projectsWithStatuses.length).to.eql(1)
       })
@@ -1039,7 +1135,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
         { id: 'id-123', lastBuildStatus: 'passing' },
       ])
 
-      return Project.getProjectStatuses([{ id: 'id-123', path: '/_test-output/path/to/project' }])
+      return ProjectE2E.getProjectStatuses([{ id: 'id-123', path: '/_test-output/path/to/project' }])
       .then((projectsWithStatuses) => {
         expect(projectsWithStatuses[0]).to.eql({
           id: 'id-123',
@@ -1053,7 +1149,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     it('returns client project when it has no id', () => {
       sinon.stub(api, 'getProjects').resolves([])
 
-      return Project.getProjectStatuses([{ path: '/_test-output/path/to/project' }])
+      return ProjectE2E.getProjectStatuses([{ path: '/_test-output/path/to/project' }])
       .then((projectsWithStatuses) => {
         expect(projectsWithStatuses[0]).to.eql({
           path: '/_test-output/path/to/project',
@@ -1070,7 +1166,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
       it('marks project as invalid if api 404s', () => {
         sinon.stub(api, 'getProject').rejects({ name: '', message: '', statusCode: 404 })
 
-        return Project.getProjectStatuses([{ id: 'id-123', path: '/_test-output/path/to/project' }])
+        return ProjectE2E.getProjectStatuses([{ id: 'id-123', path: '/_test-output/path/to/project' }])
         .then((projectsWithStatuses) => {
           expect(projectsWithStatuses[0]).to.eql({
             id: 'id-123',
@@ -1083,7 +1179,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
       it('marks project as unauthorized if api 403s', () => {
         sinon.stub(api, 'getProject').rejects({ name: '', message: '', statusCode: 403 })
 
-        return Project.getProjectStatuses([{ id: 'id-123', path: '/_test-output/path/to/project' }])
+        return ProjectE2E.getProjectStatuses([{ id: 'id-123', path: '/_test-output/path/to/project' }])
         .then((projectsWithStatuses) => {
           expect(projectsWithStatuses[0]).to.eql({
             id: 'id-123',
@@ -1096,7 +1192,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
       it('merges in project details and marks valid if somehow project exists and is authorized', () => {
         sinon.stub(api, 'getProject').resolves({ id: 'id-123', lastBuildStatus: 'passing' })
 
-        return Project.getProjectStatuses([{ id: 'id-123', path: '/_test-output/path/to/project' }])
+        return ProjectE2E.getProjectStatuses([{ id: 'id-123', path: '/_test-output/path/to/project' }])
         .then((projectsWithStatuses) => {
           expect(projectsWithStatuses[0]).to.eql({
             id: 'id-123',
@@ -1112,7 +1208,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
         sinon.stub(api, 'getProject').rejects(error)
 
-        return Project.getProjectStatuses([{ id: 'id-123', path: '/_test-output/path/to/project' }])
+        return ProjectE2E.getProjectStatuses([{ id: 'id-123', path: '/_test-output/path/to/project' }])
         .then(() => {
           throw new Error('should have caught error but did not')
         }).catch((err) => {
@@ -1135,7 +1231,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     it('gets project from api', function () {
       sinon.stub(api, 'getProject').resolves([])
 
-      return Project.getProjectStatus(this.clientProject)
+      return ProjectE2E.getProjectStatus(this.clientProject)
       .then(() => {
         expect(api.getProject).to.have.been.calledWith('id-123', 'auth-token-123')
       })
@@ -1146,7 +1242,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
         lastBuildStatus: 'passing',
       })
 
-      return Project.getProjectStatus(this.clientProject)
+      return ProjectE2E.getProjectStatus(this.clientProject)
       .then((project) => {
         expect(project).to.eql({
           id: 'id-123',
@@ -1162,7 +1258,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
       this.clientProject.id = undefined
 
-      return Project.getProjectStatus(this.clientProject)
+      return ProjectE2E.getProjectStatus(this.clientProject)
       .then((project) => {
         expect(project).to.eql({
           id: undefined,
@@ -1177,7 +1273,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     it('marks project as invalid if api 404s', function () {
       sinon.stub(api, 'getProject').rejects({ name: '', message: '', statusCode: 404 })
 
-      return Project.getProjectStatus(this.clientProject)
+      return ProjectE2E.getProjectStatus(this.clientProject)
       .then((project) => {
         expect(project).to.eql({
           id: 'id-123',
@@ -1190,7 +1286,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
     it('marks project as unauthorized if api 403s', function () {
       sinon.stub(api, 'getProject').rejects({ name: '', message: '', statusCode: 403 })
 
-      return Project.getProjectStatus(this.clientProject)
+      return ProjectE2E.getProjectStatus(this.clientProject)
       .then((project) => {
         expect(project).to.eql({
           id: 'id-123',
@@ -1205,7 +1301,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
 
       sinon.stub(api, 'getProject').rejects(error)
 
-      return Project.getProjectStatus(this.clientProject)
+      return ProjectE2E.getProjectStatus(this.clientProject)
       .then(() => {
         throw new Error('should have caught error but did not')
       }).catch((err) => {
@@ -1224,7 +1320,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
       .withArgs(this.projectId, 'auth-token-123')
       .resolves('key-123')
 
-      return Project.getSecretKeyByPath(this.todosPath).then((key) => {
+      return ProjectE2E.getSecretKeyByPath(this.todosPath).then((key) => {
         expect(key).to.eq('key-123')
       })
     })
@@ -1234,7 +1330,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
       .withArgs(this.projectId, 'auth-token-123')
       .rejects(new Error())
 
-      return Project.getSecretKeyByPath(this.todosPath)
+      return ProjectE2E.getSecretKeyByPath(this.todosPath)
       .then(() => {
         throw new Error('should have caught error but did not')
       }).catch((err) => {
@@ -1253,7 +1349,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
       .withArgs(this.projectId, 'auth-token-123')
       .resolves('new-key-123')
 
-      return Project.generateSecretKeyByPath(this.todosPath).then((key) => {
+      return ProjectE2E.generateSecretKeyByPath(this.todosPath).then((key) => {
         expect(key).to.eq('new-key-123')
       })
     })
@@ -1263,7 +1359,7 @@ This option will not have an effect in Some-other-name. Tests that rely on web s
       .withArgs(this.projectId, 'auth-token-123')
       .rejects(new Error())
 
-      return Project.generateSecretKeyByPath(this.todosPath)
+      return ProjectE2E.generateSecretKeyByPath(this.todosPath)
       .then(() => {
         throw new Error('should have caught error but did not')
       }).catch((err) => {

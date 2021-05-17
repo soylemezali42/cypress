@@ -4,6 +4,7 @@ const path = require('path')
 const debug = require('debug')('cypress:server:plugins')
 const resolve = require('resolve')
 const Promise = require('bluebird')
+const inspector = require('inspector')
 const errors = require('../errors')
 const util = require('./util')
 const pkg = require('@packages/root')
@@ -91,6 +92,14 @@ const init = (config, options) => {
     }
 
     debug('forking to run %s', childIndexFilename)
+
+    if (inspector.url()) {
+      childOptions.execArgv = _.chain(process.execArgv.slice(0))
+      .remove('--inspect-brk')
+      .push(`--inspect=${process.debugPort + 1}`)
+      .value()
+    }
+
     pluginsProcess = cp.fork(childIndexFilename, childArguments, childOptions)
     const ipc = util.wrapIpc(pluginsProcess)
 
@@ -102,6 +111,7 @@ const init = (config, options) => {
       projectRoot: options.projectRoot,
       configFile: options.configFile,
       version: pkg.version,
+      testingType: options.testingType,
     })
 
     ipc.send('load', config)
@@ -122,7 +132,7 @@ const init = (config, options) => {
 
             // no argument is passed for cy.task()
             // This is necessary because undefined becomes null when it is sent through ipc.
-            if (args[1] === undefined) {
+            if (registration.event === 'task' && args[1] === undefined) {
               args[1] = {
                 __cypress_task_no_argument__: true,
               }

@@ -1,26 +1,23 @@
 /// <reference types="cypress" />
+import Vue from 'vue'
 import {
   createLocalVue,
   mount as testUtilsMount,
   VueTestUtilsConfigOptions,
   Wrapper,
+  enableAutoDestroy,
 } from '@vue/test-utils'
+import {
+  injectStylesBeforeElement,
+  StyleOptions,
+  ROOT_ID,
+  setupHooks,
+} from '@cypress/mount-utils'
 
 const defaultOptions: (keyof MountOptions)[] = [
   'vue',
   'extensions',
-  'style',
-  'stylesheets',
 ]
-
-function checkMountModeEnabled () {
-  // @ts-ignore
-  if (Cypress.spec.specType !== 'component') {
-    throw new Error(
-      `In order to use mount or unmount functions please place the spec in component folder`,
-    )
-  }
-}
 
 const registerGlobalComponents = (Vue, options) => {
   const globalComponents = Cypress._.get(options, 'extensions.components')
@@ -70,17 +67,16 @@ const installMixins = (Vue, options) => {
   }
 }
 
-// @ts-ignore
-const hasStore = ({ store }: { store: object }) => store && store._vm
+const hasStore = ({ store }: { store: any }) => Boolean(store && store._vm)
 
-const forEachValue = (obj: object, fn: Function) => {
+const forEachValue = <T>(obj: Record<string, T>, fn: (value: T, key: string) => void) => {
   return Object.keys(obj).forEach((key) => fn(obj[key], key))
 }
 
 const resetStoreVM = (Vue, { store }) => {
   // bind store public getters
   store.getters = {}
-  const wrappedGetters = store._wrappedGetters
+  const wrappedGetters = store._wrappedGetters as Record<string, (store: any) => void>
   const computed = {}
 
   forEachValue(wrappedGetters, (fn, key) => {
@@ -120,13 +116,13 @@ type VueComponent = Vue.ComponentOptions<any> | Vue.VueConstructor
  *
  * @interface ComponentOptions
  */
-interface ComponentOptions {}
+type ComponentOptions = Record<string, unknown>
 
 // local placeholder types
-type VueLocalComponents = object
+type VueLocalComponents = Record<string, VueComponent>
 
 type VueFilters = {
-  [key: string]: Function
+  [key: string]: (value: string) => string
 }
 
 type VueMixin = unknown
@@ -231,37 +227,6 @@ interface MountOptions {
   vue: unknown
 
   /**
-   * CSS style string to inject when mounting the component
-   *
-   * @memberof MountOptions
-   * @example
-   *  const style = `
-   *    .todo.done {
-   *      text-decoration: line-through;
-   *      color: gray;
-   *    }`
-   *  mount(Todo, { style })
-   */
-  style: string
-
-  /**
-   * Stylesheet(s) urls to inject as `<link ... />` elements when
-   * mounting the component
-   *
-   * @memberof MountOptions
-   * @example
-   *  const template = '...'
-   *  const stylesheets = '/node_modules/tailwindcss/dist/tailwind.min.css'
-   *  mount({ template }, { stylesheets })
-   *
-   * @example
-   *  const template = '...'
-   *  const stylesheets = ['https://cdn.../lib.css', 'https://lib2.css']
-   *  mount({ template }, { stylesheets })
-   */
-  stylesheets: string | string[]
-
-  /**
    * Extra Vue plugins, mixins, local components to register while
    * mounting this component
    *
@@ -274,7 +239,7 @@ interface MountOptions {
 /**
  * Utility type for union of options passed to "mount(..., options)"
  */
-type MountOptionsArgument = Partial<ComponentOptions & MountOptions & VueTestUtilsConfigOptions>
+type MountOptionsArgument = Partial<ComponentOptions & MountOptions & StyleOptions & VueTestUtilsConfigOptions>
 
 // when we mount a Vue component, we add it to the global Cypress object
 // so here we extend the global Cypress namespace and its Cypress interface
@@ -313,6 +278,20 @@ function failTestOnVueError (err, vm, info) {
   window.top.onerror(err)
 }
 
+function registerAutoDestroy ($destroy: () => void) {
+  Cypress.on('test:before:run', () => {
+    $destroy()
+  })
+}
+
+enableAutoDestroy(registerAutoDestroy)
+
+const injectStyles = (options: StyleOptions) => {
+  const el = document.getElementById(ROOT_ID)
+
+  return injectStylesBeforeElement(options, document, el)
+}
+
 /**
  * Mounts a Vue component inside Cypress browser.
  * @param {object} component imported from Vue file
@@ -330,8 +309,6 @@ export const mount = (
   component: VueComponent,
   optionsOrProps: MountOptionsArgument = {},
 ) => {
-  checkMountModeEnabled()
-
   const options: Partial<MountOptions> = Cypress._.pick(
     optionsOrProps,
     defaultOptions,
@@ -344,6 +321,18 @@ export const mount = (
   return cy
   .window({
     log: false,
+  })
+  .then(() => {
+    const { style, stylesheets, stylesheet, styles, cssFiles, cssFile } = optionsOrProps
+
+    injectStyles({
+      style,
+      stylesheets,
+      stylesheet,
+      styles,
+      cssFiles,
+      cssFile,
+    })
   })
   .then((win) => {
     const localVue = createLocalVue()
@@ -367,39 +356,7 @@ export const mount = (
     // @ts-ignore
     const document: Document = cy.state('document')
 
-    document.body.innerHTML = ''
-    let el = document.getElementById('cypress-jsdom')
-
-    // If the target div doesn't exist, create it
-    if (!el) {
-      const div = document.createElement('div')
-
-      div.id = 'cypress-jsdom'
-      document.body.appendChild(div)
-      el = div
-    }
-
-    if (typeof options.stylesheets === 'string') {
-      options.stylesheets = [options.stylesheets]
-    }
-
-    if (Array.isArray(options.stylesheets)) {
-      options.stylesheets.forEach((href) => {
-        const link = document.createElement('link')
-
-        link.type = 'text/css'
-        link.rel = 'stylesheet'
-        link.href = href
-        el.append(link)
-      })
-    }
-
-    if (options.style) {
-      const style = document.createElement('style')
-
-      style.appendChild(document.createTextNode(options.style))
-      el.append(style)
-    }
+    let el = document.getElementById(ROOT_ID)
 
     const componentNode = document.createElement('div')
 
@@ -408,11 +365,9 @@ export const mount = (
     // setup Vue instance
     installFilters(localVue, options)
     installMixins(localVue, options)
-    // @ts-ignore
     installPlugins(localVue, options, props)
     registerGlobalComponents(localVue, options)
 
-    // @ts-ignore
     props.attachTo = componentNode
 
     const wrapper = localVue.extend(component as any)
@@ -436,3 +391,5 @@ export const mountCallback = (
 ) => {
   return () => mount(component, options)
 }
+
+setupHooks()

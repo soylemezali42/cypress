@@ -226,7 +226,7 @@ export default {
           // TODO: figure out why tab.memory is sometimes undefined
           if (!tab.memory) return
 
-          let start = Date.now()
+          const start = Date.now()
 
           return tab.memory.forceGarbageCollection()
           .then(() => {
@@ -241,7 +241,7 @@ export default {
           // TODO: figure out why tab.memory is sometimes undefined
           if (!tab.memory) return
 
-          let start = Date.now()
+          const start = Date.now()
 
           return tab.memory.forceCycleCollection()
           .then(() => {

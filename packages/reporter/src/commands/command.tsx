@@ -78,22 +78,31 @@ const AliasesReferences = observer(({ model, aliasesWithDuplicates }: AliasesRef
 ))
 
 interface AliasesProps {
+  isOpen: boolean
   model: CommandModel
   aliasesWithDuplicates: Array<Alias> | null
 }
 
-const Aliases = observer(({ model, aliasesWithDuplicates }: AliasesProps) => {
+const Aliases = observer(({ model, aliasesWithDuplicates, isOpen }: AliasesProps) => {
   if (!model.alias) return null
 
   return (
     <span>
-      {_.map(([] as Array<Alias>).concat(model.alias), (alias) => (
-        <Tooltip key={alias} placement='top' title={`${model.displayMessage} aliased as: '${alias}'`} className='cy-tooltip'>
-          <span className={cs('command-alias', `${model.aliasType}`, { 'show-count': shouldShowCount(aliasesWithDuplicates, alias, model) })}>
-            {alias}
-          </span>
-        </Tooltip>
-      ))}
+      {_.map(([] as Array<Alias>).concat(model.alias), (alias) => {
+        const aliases = [alias]
+
+        if (!isOpen && model.hasDuplicates) {
+          aliases.push(..._.compact(model.duplicates.map((dupe) => dupe.alias)))
+        }
+
+        return (
+          <Tooltip key={alias} placement='top' title={`${model.displayMessage} aliased as: ${aliases.map((alias) => `'${alias}'`).join(', ')}`} className='cy-tooltip'>
+            <span className={cs('command-alias', `${model.aliasType}`, { 'show-count': shouldShowCount(aliasesWithDuplicates, alias, model) })}>
+              {aliases.join(', ')}
+            </span>
+          </Tooltip>
+        )
+      })}
     </span>
   )
 })
@@ -117,6 +126,10 @@ interface ProgressProps {
 }
 
 const Progress = observer(({ model }: ProgressProps) => {
+  if (!model.timeout || !model.wallClockStartedAt) {
+    return <div className='command-progress'><span /></div>
+  }
+
   const timeElapsed = Date.now() - new Date(model.wallClockStartedAt).getTime()
   const timeRemaining = model.timeout ? model.timeout - timeElapsed : 0
   const percentageRemaining = timeRemaining / model.timeout || 0
@@ -160,6 +173,7 @@ class Command extends Component<Props> {
           `command-state-${model.state}`,
           `command-type-${model.type}`,
           {
+            'command-is-studio': model.isStudio,
             'command-is-event': !!model.event,
             'command-is-invisible': model.visible != null && !model.visible,
             'command-has-num-elements': model.state !== 'pending' && model.numElements != null,
@@ -200,6 +214,7 @@ class Command extends Component<Props> {
                 {model.referencesAlias ? <AliasesReferences model={model} aliasesWithDuplicates={aliasesWithDuplicates} /> : <Message model={model} />}
               </span>
               <span className='command-controls'>
+                <i className='far fa-times-circle studio-command-remove' onClick={this._removeStudioCommand} />
                 <Tooltip placement='top' title={visibleMessage(model)} className='cy-tooltip'>
                   <i className='command-invisible far fa-eye-slash' />
                 </Tooltip>
@@ -207,9 +222,9 @@ class Command extends Component<Props> {
                   <span className='num-elements'>{model.numElements}</span>
                 </Tooltip>
                 <span className='alias-container'>
-                  <Aliases model={model} aliasesWithDuplicates={aliasesWithDuplicates} />
+                  <Aliases model={model} aliasesWithDuplicates={aliasesWithDuplicates} isOpen={this.isOpen} />
                   <Tooltip placement='top' title={`This event occurred ${model.numDuplicates} times`} className='cy-tooltip'>
-                    <span className={cs('num-duplicates', { 'has-alias': model.alias })}>{model.numDuplicates}</span>
+                    <span className={cs('num-duplicates', { 'has-alias': model.alias, 'has-duplicates': model.numDuplicates > 1 })}>{model.numDuplicates}</span>
                   </Tooltip>
                 </span>
               </span>
@@ -258,7 +273,7 @@ class Command extends Component<Props> {
   }
 
   @action _onClick = () => {
-    if (this.props.appState.isRunning) return
+    if (this.props.appState.isRunning || this.props.appState.studioActive) return
 
     const { id } = this.props.model
 
@@ -313,6 +328,17 @@ class Command extends Component<Props> {
         }
       }, 50)
     }
+  }
+
+  _removeStudioCommand = (e: MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const { model, events } = this.props
+
+    if (!model.isStudio) return
+
+    events.emit('studio:remove:command', model.number)
   }
 }
 

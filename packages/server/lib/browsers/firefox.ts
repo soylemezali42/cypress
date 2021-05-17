@@ -5,6 +5,7 @@ import Debug from 'debug'
 import getPort from 'get-port'
 import path from 'path'
 import urlUtil from 'url'
+import { launch } from '@packages/launcher/lib/browsers'
 import FirefoxProfile from 'firefox-profile'
 import firefoxUtil from './firefox-util'
 import utils from './utils'
@@ -309,6 +310,37 @@ const defaultPreferences = {
   'browser.helperApps.neverAsk.saveToDisk': downloadMimeTypes,
 }
 
+const FIREFOX_HEADED_USERCSS = `\
+#urlbar:not(.megabar), #urlbar.megabar > #urlbar-background, #searchbar {
+  background: -moz-Field !important;
+  color: -moz-FieldText !important;
+}`
+
+const FIREFOX_HEADLESS_USERCSS = `\
+#urlbar {
+  height: 0px !important;
+  min-height: 0px !important;
+  overflow: hidden !important;
+}
+#toolbar {
+  height: 0px !important;
+  min-height: 0px !important;
+  overflow: hidden !important;
+}
+toolbar {
+  height: 0px !important;
+  min-height: 0px !important;
+  overflow: hidden !important;
+}
+#titlebar {
+  height: 0px !important;
+  min-height: 0px !important;
+  overflow: hidden !important;
+  display: none;
+}
+
+`
+
 export function _createDetachedInstance (browserInstance: BrowserInstance): BrowserInstance {
   const detachedInstance: BrowserInstance = new EventEmitter() as BrowserInstance
 
@@ -325,7 +357,7 @@ export function _createDetachedInstance (browserInstance: BrowserInstance): Brow
   return detachedInstance
 }
 
-export async function open (browser: Browser, url, options: any = {}): Bluebird<BrowserInstance> {
+export async function open (browser: Browser, url, options: any = {}): Promise<BrowserInstance> {
   const defaultLaunchOptions = utils.getDefaultLaunchOptions({
     extensions: [] as string[],
     preferences: _.extend({}, defaultPreferences),
@@ -340,6 +372,10 @@ export async function open (browser: Browser, url, options: any = {}): Bluebird<
 
   if (browser.isHeadless) {
     defaultLaunchOptions.args.push('-headless')
+    // we don't need to specify width/height since MOZ_HEADLESS_ env vars will be set
+    // and the browser will spawn maximized. The user may still supply these args to override
+    // defaultLaunchOptions.args.push('--width=1920')
+    // defaultLaunchOptions.args.push('--height=1081')
   }
 
   debug('firefox open %o', options)
@@ -417,7 +453,7 @@ export async function open (browser: Browser, url, options: any = {}): Bluebird<
   }
 
   launchOptions.preferences['browser.cache.disk.parent_directory'] = cacheDir
-  for (let pref in launchOptions.preferences) {
+  for (const pref in launchOptions.preferences) {
     const value = launchOptions.preferences[pref]
 
     profile.setPreference(pref, value)
@@ -429,18 +465,23 @@ export async function open (browser: Browser, url, options: any = {}): Bluebird<
   const userCSSPath = path.join(profileDir, 'chrome')
 
   if (!await fs.pathExists(path.join(userCSSPath, 'userChrome.css'))) {
-    const userCss = `
-    #urlbar:not(.megabar), #urlbar.megabar > #urlbar-background, #searchbar {
-      background: -moz-Field !important;
-      color: -moz-FieldText !important;
-    }
-  `
-
     try {
       await fs.mkdir(userCSSPath)
     } catch {
       // probably the folder already exists, this is fine
     }
+
+    // if we're headed we change the yellow automation mode url bar back to a normal color
+    //
+    // if we're headless we use userCss to 'trick' the browser
+    //  into having a consistent browser window size that's near-fullscreen
+    //  however it unfortunately still leaves 1px of padding at the top)
+    //  without this trick there would be ~74px of padding at the top instead of 1px.
+    //
+    // TODO: allow configuring userCss through launchOptions
+
+    const userCss = options.browser.isHeadless ? FIREFOX_HEADLESS_USERCSS : FIREFOX_HEADED_USERCSS
+
     await fs.writeFile(path.join(profileDir, 'chrome', 'userChrome.css'), userCss)
   }
 
@@ -451,7 +492,12 @@ export async function open (browser: Browser, url, options: any = {}): Bluebird<
 
   debug('launch in firefox', { url, args: launchOptions.args })
 
-  const browserInstance = await utils.launch(browser, 'about:blank', launchOptions.args)
+  const browserInstance = await launch(browser, 'about:blank', launchOptions.args, {
+    // sets headless resolution to 1920x1080 by default
+    // user can overwrite this default with these env vars or --height, --width arguments
+    MOZ_HEADLESS_WIDTH: '1920',
+    MOZ_HEADLESS_HEIGHT: '1081',
+  })
 
   await firefoxUtil.setup({ extensions: launchOptions.extensions, url, foxdriverPort, marionettePort })
   .catch((err) => {

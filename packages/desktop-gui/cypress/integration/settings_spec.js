@@ -121,13 +121,7 @@ describe('Settings', () => {
         cy.get('.config-vars').invoke('text')
         .should('contain', '0:Chrome')
 
-        // make sure the main collapsible content
-        // has finished animating and that it has
-        // an empty inline style attribute
-        cy.get('.rc-collapse-content')
-        .should('not.have.class', 'rc-collapse-anim')
-        .should('have.attr', 'style', '')
-
+        cy.ensureAnimationsFinished()
         cy.percySnapshot()
       })
 
@@ -222,7 +216,7 @@ describe('Settings', () => {
 
       it('opens help link on click', () => {
         cy.get('.settings-config .learn-more').click().then(function () {
-          expect(this.ipc.externalOpen).to.be.calledWith('https://on.cypress.io/guides/configuration')
+          expect(this.ipc.externalOpen).to.be.calledWithMatch({ url: 'https://on.cypress.io/guides/configuration' })
         })
       })
 
@@ -413,7 +407,7 @@ describe('Settings', () => {
 
       it('opens ci guide when learn more is clicked', () => {
         cy.get('.settings-record-key').contains('Learn more').click().then(function () {
-          expect(this.ipc.externalOpen).to.be.calledWith('https://on.cypress.io/what-is-a-record-key')
+          expect(this.ipc.externalOpen).to.be.calledWithMatch({ url: 'https://on.cypress.io/what-is-a-record-key' })
         })
       })
 
@@ -483,6 +477,8 @@ describe('Settings', () => {
 
         it('shows message that user must be logged in to view record keys', () => {
           cy.get('.empty-well').should('contain', 'must be logged in')
+
+          cy.ensureAnimationsFinished()
           cy.percySnapshot()
         })
 
@@ -504,6 +500,10 @@ describe('Settings', () => {
           cy.get('.settings-record-key')
           .contains(`cypress run --record --key ${this.keys[0].id}`)
 
+          // extra insurance that panel in background is fully expanded
+          cy.contains('You can change this key')
+
+          cy.ensureAnimationsFinished()
           cy.percySnapshot()
         })
       })
@@ -606,7 +606,7 @@ describe('Settings', () => {
 
     it('opens help link on click', () => {
       cy.get('.settings-proxy .learn-more').click().then(function () {
-        expect(this.ipc.externalOpen).to.be.calledWith('https://on.cypress.io/proxy-configuration')
+        expect(this.ipc.externalOpen).to.be.calledWithMatch({ url: 'https://on.cypress.io/proxy-configuration' })
       })
     })
 
@@ -697,7 +697,7 @@ describe('Settings', () => {
       const hasLearnMoreLink = () => {
         cy.get('[data-cy=experiments]').contains('a', 'Learn more').click()
         .then(function () {
-          expect(this.ipc.externalOpen).to.be.calledWith('https://on.cypress.io/experiments')
+          expect(this.ipc.externalOpen).to.be.calledWithMatch({ url: 'https://on.cypress.io/experiments' })
         })
       }
 
@@ -785,7 +785,7 @@ describe('Settings', () => {
 
     it('opens file preference guide when learn more is clicked', () => {
       cy.get('.file-preference').contains('Learn more').click().then(function () {
-        expect(this.ipc.externalOpen).to.be.calledWith('https://on.cypress.io/file-opener-preference')
+        expect(this.ipc.externalOpen).to.be.calledWithMatch({ url: 'https://on.cypress.io/file-opener-preference' })
       })
     })
 

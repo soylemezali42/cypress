@@ -6,8 +6,11 @@ import _ from 'lodash'
 import os from 'os'
 import path from 'path'
 import extension from '@packages/extension'
+import mime from 'mime'
+import { launch } from '@packages/launcher'
+
 import appData from '../util/app_data'
-import fs from '../util/fs'
+import { fs } from '../util/fs'
 import { CdpAutomation } from './cdp_automation'
 import * as CriClient from './cri-client'
 import * as protocol from './protocol'
@@ -63,6 +66,7 @@ const DEFAULT_ARGS = [
   '--allow-insecure-localhost',
   '--reduce-security-for-testing',
   '--enable-automation',
+  '--disable-print-preview',
 
   '--disable-device-discovery-notifications',
 
@@ -237,6 +241,8 @@ const _disableRestorePagesPrompt = function (userDir) {
         return fs.outputJson(prefsPath, preferences)
       }
     }
+
+    return
   })
   .catch(() => { })
 }
@@ -292,7 +298,35 @@ const _navigateUsingCRI = async function (client, url) {
   await client.send('Page.navigate', { url })
 }
 
-const _setDownloadsDir = async function (client, dir) {
+const _handleDownloads = async function (client, dir, automation) {
+  await client.send('Page.enable')
+
+  client.on('Page.downloadWillBegin', (data) => {
+    const downloadItem = {
+      id: data.guid,
+      url: data.url,
+    }
+
+    const filename = data.suggestedFilename
+
+    if (filename) {
+      // @ts-ignore
+      downloadItem.filePath = path.join(dir, data.suggestedFilename)
+      // @ts-ignore
+      downloadItem.mime = mime.getType(data.suggestedFilename)
+    }
+
+    automation.push('create:download', downloadItem)
+  })
+
+  client.on('Page.downloadProgress', (data) => {
+    if (data.state !== 'completed') return
+
+    automation.push('complete:download', {
+      id: data.guid,
+    })
+  })
+
   await client.send('Page.setDownloadBehavior', {
     behavior: 'allow',
     downloadPath: dir,
@@ -322,7 +356,7 @@ export = {
 
   _navigateUsingCRI,
 
-  _setDownloadsDir,
+  _handleDownloads,
 
   _setAutomation,
 
@@ -395,9 +429,9 @@ export = {
     if (isHeadless) {
       args.push('--headless')
 
-      // set the window size for headless to a better default
+      // set default headless size to 1920x1080
       // https://github.com/cypress-io/cypress/issues/6210
-      args.push('--window-size=1280,720')
+      args.push('--window-size=1920,1080')
     }
 
     // force ipv4
@@ -460,7 +494,7 @@ export = {
     // first allows us to connect the remote interface,
     // start video recording and then
     // we will load the actual page
-    const launchedBrowser = await utils.launch(browser, 'about:blank', args)
+    const launchedBrowser = await launch(browser, 'about:blank', args)
 
     la(launchedBrowser, 'did not get launched browser instance')
 
@@ -473,6 +507,9 @@ export = {
 
     await criClient.ensureMinimumProtocolVersion('1.3')
     .catch((err) => {
+      // if this minumum chrome version changes, sync it with
+      // packages/web-config/webpack.config.base.ts and
+      // npm/webpack-batteries-included-preprocessor/index.js
       throw new Error(`Cypress requires at least Chrome 64.\n\nDetails:\n${err.message}`)
     })
 
@@ -481,6 +518,7 @@ export = {
     // monkey-patch the .kill method to that the CDP connection is closed
     const originalBrowserKill = launchedBrowser.kill
 
+    /* @ts-expect-error */
     launchedBrowser.kill = async (...args) => {
       debug('closing remote interface client')
 
@@ -492,7 +530,7 @@ export = {
 
     await this._maybeRecordVideo(criClient, options)
     await this._navigateUsingCRI(criClient, url)
-    await this._setDownloadsDir(criClient, options.downloadsFolder)
+    await this._handleDownloads(criClient, options.downloadsFolder, automation)
 
     // return the launched browser process
     // with additional method to close the remote connection

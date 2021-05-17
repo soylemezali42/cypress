@@ -244,8 +244,6 @@ describe('test errors', () => {
       .get('.test-err-code-frame')
       .should('be.visible')
 
-      // ensure the page is loaded before taking snapshot
-      cy.get('.focus-tests-text').should('be.visible')
       cy.percySnapshot()
     })
 
@@ -284,6 +282,24 @@ describe('test errors', () => {
         line: 2,
         column: 7,
       },
+    })
+  })
+
+  describe('studio error', () => {
+    beforeEach(() => {
+      setError(runnablesWithErr)
+    })
+
+    it('is not visible by default', () => {
+      cy.get('.studio-err-wrapper').should('not.be.visible')
+    })
+
+    it('is visible when studio is active', () => {
+      runner.emit('reporter:start', { studioActive: true })
+
+      cy.get('.studio-err-wrapper').should('be.visible')
+
+      cy.percySnapshot()
     })
   })
 })
